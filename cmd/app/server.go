@@ -6,18 +6,15 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
 
-	"kubesphere.io/ks-mcp-server/cmd/app/options"
-	"kubesphere.io/ks-mcp-server/pkg/kubesphere"
-	"kubesphere.io/ks-mcp-server/pkg/tools/cluster"
-	"kubesphere.io/ks-mcp-server/pkg/tools/extension"
-	"kubesphere.io/ks-mcp-server/pkg/tools/userrole"
-	"kubesphere.io/ks-mcp-server/pkg/tools/workspace"
-	"kubesphere.io/ks-mcp-server/pkg/version"
+	"github.com/duylvh/mcp-kubesphere/cmd/app/options"
+	"github.com/duylvh/mcp-kubesphere/pkg/kubesphere"
+	"github.com/duylvh/mcp-kubesphere/pkg/tools"
+	"github.com/duylvh/mcp-kubesphere/pkg/version"
 )
 
 func NewRootCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:          "ks-mcp-server",
+		Use:          "mcp-kubesphere",
 		Short:        "KubeSphere MCP Server",
 		Version:      fmt.Sprint(version.Get()),
 		SilenceUsage: true,
@@ -46,39 +43,10 @@ func newStudioCommand() *cobra.Command {
 		Use:   "stdio",
 		Short: "Start stdio server",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			// get restconfig
-			restconfig, err := kubesphere.LoadKSConfig(o.KSConfig)
+			s, err := newMCPServer(o.KSConfig, o.KSApiserver)
 			if err != nil {
 				return err
 			}
-			ksconfig, err := kubesphere.NewKSConfig(restconfig, o.KSApiserver)
-			if err != nil {
-				return err
-			}
-			// create MCP server
-			s := server.NewMCPServer(
-				"KubeSphere",
-				"4.1.3",
-			)
-			s.SetTools(
-				// register userrole
-				userrole.ListUsers(ksconfig), userrole.GetUser(ksconfig),
-				userrole.ListRoles(ksconfig), userrole.GetRole(ksconfig), userrole.ListPermissions(ksconfig),
-				// register workspace
-				workspace.ListWorkspaces(ksconfig), workspace.GetWorkspace(ksconfig), workspace.ListWorkspaceMembers(ksconfig), workspace.GetWorkspaceQuotas(ksconfig),
-				workspace.ListApplicationRepos(ksconfig), workspace.ListApplications(ksconfig), workspace.GetApplication(ksconfig), workspace.GetApplicationVersion(ksconfig),
-				workspace.GetWorkspace(ksconfig), workspace.ListProjectMembers(ksconfig),
-				// register cluster
-				cluster.ListClusters(ksconfig), cluster.GetCluster(ksconfig), cluster.GetClusterTags(ksconfig), cluster.ListClusterMembers(ksconfig),
-				cluster.ListNodes(ksconfig), cluster.ListProjects(ksconfig), cluster.ListDeployments(ksconfig), cluster.ListStatefulsets(ksconfig), cluster.ListDaemonsets(ksconfig),
-				cluster.ListJobs(ksconfig), cluster.ListCronJobs(ksconfig), cluster.ListPods(ksconfig), cluster.ListServices(ksconfig), cluster.ListIngresses(ksconfig),
-				cluster.ListSecrets(ksconfig), cluster.ListConfigmaps(ksconfig), cluster.ListServiceAccounts(ksconfig), cluster.ListCustomResourceDefinitions(ksconfig),
-				cluster.ListPersistentVolumeClaims(ksconfig), cluster.ListPersistentVolumes(ksconfig), cluster.ListStorageClasses(ksconfig),
-				// register extension
-				extension.ListExtensions(ksconfig),
-			)
-
-			// Start the stdio server
 			return server.ServeStdio(s)
 		},
 	}
@@ -90,45 +58,16 @@ func newStudioCommand() *cobra.Command {
 }
 
 func newSSECommand() *cobra.Command {
-	o := options.NewStdioOptions()
+	o := options.NewSSEOptions()
 	cmd := &cobra.Command{
 		Use:   "sse",
 		Short: "Start sse server",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			// get restconfig
-			restconfig, err := kubesphere.LoadKSConfig(o.KSConfig)
+			s, err := newMCPServer(o.KSConfig, o.KSApiserver)
 			if err != nil {
 				return err
 			}
-			ksconfig, err := kubesphere.NewKSConfig(restconfig, o.KSApiserver)
-			if err != nil {
-				return err
-			}
-			// create MCP server
-			s := server.NewMCPServer(
-				"KubeSphere",
-				"4.1.3",
-			)
-			s.SetTools(
-				// register userrole
-				userrole.ListUsers(ksconfig), userrole.GetUser(ksconfig),
-				userrole.ListRoles(ksconfig), userrole.GetRole(ksconfig), userrole.ListPermissions(ksconfig),
-				// register workspace
-				workspace.ListWorkspaces(ksconfig), workspace.GetWorkspace(ksconfig), workspace.ListWorkspaceMembers(ksconfig), workspace.GetWorkspaceQuotas(ksconfig),
-				workspace.ListApplicationRepos(ksconfig), workspace.ListApplications(ksconfig), workspace.GetApplication(ksconfig), workspace.GetApplicationVersion(ksconfig),
-				workspace.GetWorkspace(ksconfig), workspace.ListProjectMembers(ksconfig),
-				// register cluster
-				cluster.ListClusters(ksconfig), cluster.GetCluster(ksconfig), cluster.GetClusterTags(ksconfig), cluster.ListClusterMembers(ksconfig),
-				cluster.ListNodes(ksconfig), cluster.ListProjects(ksconfig), cluster.ListDeployments(ksconfig), cluster.ListStatefulsets(ksconfig), cluster.ListDaemonsets(ksconfig),
-				cluster.ListJobs(ksconfig), cluster.ListCronJobs(ksconfig), cluster.ListPods(ksconfig), cluster.ListServices(ksconfig), cluster.ListIngresses(ksconfig),
-				cluster.ListSecrets(ksconfig), cluster.ListConfigmaps(ksconfig), cluster.ListServiceAccounts(ksconfig), cluster.ListCustomResourceDefinitions(ksconfig),
-				cluster.ListPersistentVolumeClaims(ksconfig), cluster.ListPersistentVolumes(ksconfig), cluster.ListStorageClasses(ksconfig),
-				// register extension
-				extension.ListExtensions(ksconfig),
-			)
-			// Start the sse server
-			sse := server.NewSSEServer(s)
-			return sse.Start(":8080")
+			return server.NewSSEServer(s).Start(":" + o.Port)
 		},
 	}
 
@@ -136,4 +75,20 @@ func newSSECommand() *cobra.Command {
 		cmd.Flags().AddFlagSet(f)
 	}
 	return cmd
+}
+
+// newMCPServer connects to KubeSphere with a browser session file
+// (KS_COOKIE_FILE) when set, or with the ksconfig bearer token otherwise.
+func newMCPServer(ksconfigPath, apiserver string) (*server.MCPServer, error) {
+	opts, err := kubesphere.OptionsFromEnv(ksconfigPath, apiserver)
+	if err != nil {
+		return nil, err
+	}
+	ksconfig, err := kubesphere.NewKSConfig(opts)
+	if err != nil {
+		return nil, err
+	}
+	s := server.NewMCPServer("KubeSphere", version.Get().GitVersion)
+	s.SetTools(tools.All(ksconfig)...)
+	return s, nil
 }

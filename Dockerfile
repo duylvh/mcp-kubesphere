@@ -7,10 +7,10 @@ ENV GOPROXY ${goproxy}
 
 COPY . .
 
-RUN CGO_ENABLED=0 go build -o ks-mcp-server cmd/main.go
+RUN CGO_ENABLED=0 go build -o mcp-kubesphere cmd/main.go
 
 FROM alpine:3.21.3
 
-COPY --from=builder /build/ks-mcp-server /usr/local/bin/ks-mcp-server
+COPY --from=builder /build/mcp-kubesphere /usr/local/bin/mcp-kubesphere
 
 ENTRYPOINT ["mcp-server"]

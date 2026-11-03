@@ -1,5 +1,6 @@
 package constants
 
+// Role levels accepted by the role tools.
 const (
 	PlatformLevel  = "global"
 	ClusterLevel   = "cluster"
@@ -7,7 +8,8 @@ const (
 	ProjectLevel   = "namespace"
 )
 
+// Default paging for list tools.
 const (
-	DefLimit = "10"
-	DefPage  = "1"
+	DefLimit = 10
+	DefPage  = 1
 )

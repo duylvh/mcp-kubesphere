@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"os"
 
-	"kubesphere.io/ks-mcp-server/cmd/app"
+	"github.com/duylvh/mcp-kubesphere/cmd/app"
 )
 
 func main() {
 	if err := app.NewRootCommand().Execute(); err != nil {
-		fmt.Printf("%+v", err)
+		// stdout is the MCP channel; errors go to stderr.
+		fmt.Fprintf(os.Stderr, "%+v\n", err)
 		os.Exit(1)
 	}
 }
