@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -142,4 +143,29 @@ func TestCompactObjectPassesNonJSONThrough(t *testing.T) {
 	out, err := compactObject([]byte("not json"))
 	require.NoError(t, err)
 	assert.Equal(t, "not json", string(out))
+}
+
+func TestTrimLogNoteMatchesWhereItCut(t *testing.T) {
+	lines := strings.Repeat(strings.Repeat("x", 99)+"\n", maxLogBytes/100+50)
+	out, err := trimLog([]byte(lines))
+	require.NoError(t, err)
+	note, _, _ := strings.Cut(string(out), "\n")
+	assert.Contains(t, note, "lower tailLines or use sinceSeconds", "a cut at a line start suggests fewer lines")
+
+	out, err = trimLog([]byte(strings.Repeat("y", maxLogBytes+500)))
+	require.NoError(t, err)
+	note, _, _ = strings.Cut(string(out), "\n")
+	assert.NotContains(t, note, "tailLines", "fewer lines cannot shrink a single line")
+	assert.Contains(t, note, "the newest line alone exceeds 64 KiB")
+}
+
+func TestTrimLogKeepsBytesThatAreNotUTF8(t *testing.T) {
+	// Continuation bytes are never a character start; the cut must not skip
+	// past all of them and return only the note.
+	body := bytes.Repeat([]byte{0x80}, maxLogBytes+500)
+	out, err := trimLog(body)
+	require.NoError(t, err)
+	_, kept, ok := bytes.Cut(out, []byte("]\n"))
+	require.True(t, ok)
+	assert.Equal(t, maxLogBytes-(utf8.UTFMax-1), len(kept), "the cut moves at most utf8.UTFMax-1 bytes")
 }
