@@ -1,261 +1,245 @@
 package kubesphere
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/pkg/errors"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
-	"k8s.io/client-go/util/flowcontrol"
-	kubespherescheme "kubesphere.io/client-go/kubesphere/scheme"
 
-	"kubesphere.io/ks-mcp-server/pkg/constants"
+	"github.com/duylvh/mcp-kubesphere/pkg/constants"
 )
 
-var defaultKSConfig = clientcmdapi.Config{
-	Clusters: map[string]*clientcmdapi.Cluster{
-		"kubesphere": {
-			Server: "https://kubesphere.com",
-		},
-	},
-	Contexts: map[string]*clientcmdapi.Context{
-		"kubesphere": {
-			Cluster:  "kubesphere",
-			AuthInfo: "kubesphere-admin",
-		},
-	},
-	AuthInfos: map[string]*clientcmdapi.AuthInfo{
-		"kubesphere-admin": {
-			Username: "admin",
-			Password: "P@88w0rd",
-		},
-	},
-	CurrentContext: "kubesphere",
+// requestTimeout bounds waiting for KubeSphere to answer. In cookie mode it
+// applies per request hop, so a session refresh running between the first
+// attempt and the retry (up to cookieRefreshTimeout) is not cut short.
+var requestTimeout = 60 * time.Second
+
+const (
+	// URLEnvVar names the KubeSphere console or ks-apiserver address.
+	URLEnvVar = "KS_URL"
+
+	maxResponseSize = 32 << 20
+	maxErrorMessage = 300
+)
+
+// Options selects how the server reaches and authenticates to KubeSphere.
+// CookieFile takes precedence; otherwise KSConfig must hold a bearer token.
+type Options struct {
+	// KSConfig is a kubeconfig-format file holding the server address, an
+	// optional CA and a bearer token.
+	KSConfig string
+	// APIServer overrides the address from KSConfig, or names it in cookie mode.
+	APIServer string
+	// CookieFile is an absolute path to an origin-keyed session file.
+	CookieFile string
+	// CookieRefreshCommand renews CookieFile; it requires CookieFile.
+	CookieRefreshCommand []string
 }
 
-func LoadKSConfig(kubeconfig string) (config *restclient.Config, err error) {
-	if kubeconfig == "" {
-		return clientcmd.NewDefaultClientConfig(defaultKSConfig, nil).ClientConfig()
+// OptionsFromEnv fills cookie-mode settings from KS_URL, KS_COOKIE_FILE and
+// KS_COOKIE_REFRESH_COMMAND on top of the command-line values.
+func OptionsFromEnv(ksconfig, apiserver string) (Options, error) {
+	o := Options{KSConfig: ksconfig, APIServer: apiserver, CookieFile: os.Getenv(CookieFileEnvVar)}
+	if v := os.Getenv(URLEnvVar); v != "" {
+		o.APIServer = v
 	}
-
-	return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-		&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfig},
-		&clientcmd.ConfigOverrides{
-			CurrentContext: constants.Getenv(constants.Kubesphere),
-		}).ClientConfig()
+	if raw := os.Getenv(CookieRefreshCommandEnvVar); raw != "" {
+		if o.CookieFile == "" {
+			return Options{}, fmt.Errorf("%s requires %s", CookieRefreshCommandEnvVar, CookieFileEnvVar)
+		}
+		argv, err := ParseCookieRefreshCommand(raw)
+		if err != nil {
+			return Options{}, err
+		}
+		o.CookieRefreshCommand = argv
+	}
+	return o, nil
 }
 
+// KSConfig sends authenticated GET requests to the KubeSphere API.
 type KSConfig struct {
-	// httpClient is the http client to use for requests
 	httpClient *http.Client
-
-	// config is the rest.Config to talk to an apiserver
-	config *restclient.Config
-
-	// ksClientByType stores structured type metadata
-	ksClientByType map[string]*ksClient
-
-	mu sync.RWMutex
+	baseURL    *url.URL
 }
 
-var _ restclient.Interface = &ksClient{}
-
-func NewKSConfig(config *restclient.Config, apiserver string) (*KSConfig, error) {
-	if config.BearerToken == "" && config.Password == "" {
-		return nil, errors.New("[bearerToken] and [user, password] should not both be empty")
+// NewKSConfig builds a client for cookie mode when o.CookieFile is set, and
+// for bearer-token mode otherwise.
+func NewKSConfig(o Options) (*KSConfig, error) {
+	var (
+		base          string
+		transport     http.RoundTripper
+		clientTimeout time.Duration
+	)
+	if o.CookieFile != "" {
+		if o.APIServer == "" {
+			return nil, fmt.Errorf("%s requires the KubeSphere address in %s or --ks-apiserver", CookieFileEnvVar, URLEnvVar)
+		}
+		base = o.APIServer
+		hop := http.DefaultTransport.(*http.Transport).Clone()
+		hop.ResponseHeaderTimeout = requestTimeout
+		t, err := newSessionCookieTransport(hop, o.CookieFile, base, o.CookieRefreshCommand)
+		if err != nil {
+			return nil, err
+		}
+		transport = t
+	} else {
+		if len(o.CookieRefreshCommand) > 0 {
+			return nil, fmt.Errorf("a cookie refresh command requires %s", CookieFileEnvVar)
+		}
+		config, err := loadKSConfig(o.KSConfig)
+		if err != nil {
+			return nil, err
+		}
+		if config.BearerToken == "" && config.BearerTokenFile == "" {
+			return nil, fmt.Errorf("the ksconfig must hold a bearer token (users[].user.token), or set %s to use a browser session", CookieFileEnvVar)
+		}
+		base = config.Host
+		if o.APIServer != "" {
+			base = o.APIServer
+		}
+		config.Host = base
+		rt, err := restclient.TransportFor(config)
+		if err != nil {
+			return nil, err
+		}
+		transport = rt
+		clientTimeout = requestTimeout
 	}
-	if apiserver != "" {
-		config.Host = apiserver
+	u, err := url.Parse(strings.TrimRight(base, "/"))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil, errors.New("the KubeSphere address must be an absolute http(s) URL")
 	}
-	httpclient, err := restclient.HTTPClientFor(config)
-	if err != nil {
-		return nil, err
-	}
-
 	return &KSConfig{
-		httpClient:     httpclient,
-		config:         config,
-		ksClientByType: make(map[string]*ksClient),
+		baseURL: u,
+		httpClient: &http.Client{
+			Transport: transport,
+			Timeout:   clientTimeout,
+			// API routes never redirect; a redirect means the session is not
+			// accepted, and following it would return a sign-in page as data.
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		},
 	}, nil
 }
 
-func (c *KSConfig) RestClient(gv schema.GroupVersion, cluster string) (restclient.Interface, error) {
-	apiPath := "kapis"
+func loadKSConfig(path string) (*restclient.Config, error) {
+	if path == "" {
+		return nil, fmt.Errorf("pass --ksconfig with a bearer token, or set %s", CookieFileEnvVar)
+	}
+	return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		&clientcmd.ClientConfigLoadingRules{ExplicitPath: path},
+		&clientcmd.ConfigOverrides{CurrentContext: constants.Getenv(constants.Kubesphere)},
+	).ClientConfig()
+}
+
+// KAPIPath builds "/kapis[/clusters/{cluster}]/{groupVersion}/{segments...}".
+// An empty cluster addresses the cluster that serves the API (the host
+// cluster). Each segment is a single path element; user-supplied names that
+// could change the path, such as "..", are rejected.
+func KAPIPath(cluster, groupVersion string, segments ...string) (string, error) {
+	var b strings.Builder
+	b.WriteString("/kapis")
 	if cluster != "" {
-		apiPath = "clusters/" + cluster + "/kapis"
+		if err := checkSegment("cluster", cluster); err != nil {
+			return "", err
+		}
+		b.WriteString("/clusters/")
+		b.WriteString(url.PathEscape(cluster))
 	}
-
-	c.mu.RLock()
-	r, known := c.ksClientByType[apiPath+"/"+gv.String()]
-	c.mu.RUnlock()
-
-	if known {
-		return r, nil
+	b.WriteString("/")
+	b.WriteString(groupVersion)
+	for _, s := range segments {
+		if err := checkSegment("name", s); err != nil {
+			return "", err
+		}
+		b.WriteString("/")
+		b.WriteString(url.PathEscape(s))
 	}
+	return b.String(), nil
+}
 
-	// Initialize a new Client
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	restconfig := restclient.CopyConfig(c.config)
-	restconfig.NegotiatedSerializer = kubespherescheme.Codecs
-	restconfig.GroupVersion = &gv
-	restconfig.APIPath = apiPath
+func checkSegment(kind, s string) error {
+	if s == "" || s == "." || s == ".." || strings.ContainsAny(s, "/\\?#%") || strings.ContainsFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+		return fmt.Errorf("invalid %s %q", kind, s)
+	}
+	return nil
+}
 
-	restclient, err := restclient.UnversionedRESTClientForConfigAndClient(restconfig, c.httpClient)
+// Get requests path (from KAPIPath) with query and returns the JSON body.
+func (c *KSConfig) Get(ctx context.Context, path string, query url.Values) ([]byte, error) {
+	// path is already escaped by KAPIPath.
+	target := c.baseURL.String() + path
+	if q := query.Encode(); q != "" {
+		target += "?" + q
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return nil, err
 	}
-	ksclient := &ksClient{
-		restclient: restclient,
-		config:     restconfig,
-		tokenCache: make(map[string]*token),
-	}
-	c.ksClientByType[apiPath+"/"+gv.String()] = ksclient
-
-	return ksclient, nil
-}
-
-type ksClient struct {
-	restclient restclient.Interface
-	// config is the rest.Config to talk to an apiserver
-	config *restclient.Config
-
-	// store token cache to access kubesphere
-	tokenCache map[string]*token
-	mu         sync.RWMutex
-}
-
-type token struct {
-	created      time.Time
-	AccessToken  string `json:"access_Token"`
-	TokenType    string `json:"token_type"`
-	RefreshToken string `json:"refresh_token"`
-	ExpiresIn    int    `json:"expires_in"`
-}
-
-// APIVersion implements rest.Interface.
-func (k *ksClient) APIVersion() schema.GroupVersion {
-	return k.restclient.APIVersion()
-}
-
-// Delete implements rest.Interface.
-func (k *ksClient) Delete() *restclient.Request {
-	token, err := k.accessToken()
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return k.restclient.Delete()
+		return nil, err
 	}
-
-	return k.restclient.Delete().SetHeader("Authorization", "Bearer "+token)
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("reading KubeSphere response for %s: %w", path, err)
+	}
+	if len(body) > maxResponseSize {
+		return nil, fmt.Errorf("KubeSphere response for %s exceeds %d MiB; use a smaller limit", path, maxResponseSize>>20)
+	}
+	switch {
+	case resp.StatusCode >= 300 && resp.StatusCode < 400:
+		loc, _ := req.URL.Parse(resp.Header.Get("Location"))
+		return nil, fmt.Errorf("KubeSphere redirected %s to %s; the session is not signed in", path, redirectTarget(loc))
+	}
+	mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		msg := "(HTML page)"
+		if mediaType != "text/html" {
+			msg = errorMessage(body)
+		}
+		return nil, fmt.Errorf("KubeSphere returned %d for %s: %s", resp.StatusCode, path, msg)
+	}
+	if mediaType == "text/html" {
+		return nil, fmt.Errorf("KubeSphere returned an HTML page instead of JSON for %s; this address does not serve that API path", path)
+	}
+	return body, nil
 }
 
-// Get implements rest.Interface.
-func (k *ksClient) Get() *restclient.Request {
-	token, err := k.accessToken()
-	if err != nil {
-		return k.restclient.Get()
+func redirectTarget(u *url.URL) string {
+	if u == nil {
+		return "<unknown>"
 	}
-
-	return k.restclient.Get().SetHeader("Authorization", "Bearer "+token)
+	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path}).String()
 }
 
-// GetRateLimiter implements rest.Interface.
-func (k *ksClient) GetRateLimiter() flowcontrol.RateLimiter {
-	return k.restclient.GetRateLimiter()
-}
-
-// Patch implements rest.Interface.
-func (k *ksClient) Patch(pt types.PatchType) *restclient.Request {
-	token, err := k.accessToken()
-	if err != nil {
-		return k.restclient.Patch(pt)
+// errorMessage extracts the "message" of a Kubernetes Status body, or a short
+// prefix of a plain-text body.
+func errorMessage(body []byte) string {
+	var status struct {
+		Message string `json:"message"`
 	}
-
-	return k.restclient.Patch(pt).SetHeader("Authorization", "Bearer "+token)
-}
-
-// Post implements rest.Interface.
-func (k *ksClient) Post() *restclient.Request {
-	token, err := k.accessToken()
-	if err != nil {
-		return k.restclient.Post()
+	msg := strings.TrimSpace(string(body))
+	if json.Unmarshal(body, &status) == nil && status.Message != "" {
+		msg = status.Message
 	}
-
-	return k.restclient.Post().SetHeader("Authorization", "Bearer "+token)
-}
-
-// Put implements rest.Interface.
-func (k *ksClient) Put() *restclient.Request {
-	token, err := k.accessToken()
-	if err != nil {
-		return k.restclient.Put()
+	msg = strings.Join(strings.Fields(msg), " ")
+	if len(msg) > maxErrorMessage {
+		msg = msg[:maxErrorMessage] + "…"
 	}
-
-	return k.restclient.Put().SetHeader("Authorization", "Bearer "+token)
-}
-
-// Verb implements rest.Interface.
-func (k *ksClient) Verb(verb string) *restclient.Request {
-	token, err := k.accessToken()
-	if err != nil {
-		return k.restclient.Verb(verb)
+	if msg == "" {
+		return "(empty body)"
 	}
-
-	return k.restclient.Verb(verb).SetHeader("Authorization", "Bearer "+token)
-}
-
-// AccessToken from tokenCache, if not exists in tokenCache, get it in ks-apiserver.
-// refer to: https://kubesphere.io/zh/docs/v3.4/reference/api-docs/
-func (k *ksClient) accessToken() (string, error) {
-	if k.config.BearerToken != "" {
-		return k.config.BearerToken, nil
-	}
-	k.mu.RLock()
-	// `tokenReservedTime`: Specifies the buffer duration before a token expires prematurely.
-	// This mechanism prevents scenarios where tokens might become invalid before reaching the server due to prolonged network delays during request processing.
-	tokenReservedTime := time.Minute * 1
-	ctk, ok := k.tokenCache[k.config.Username]
-	if ok && ctk.created.Add(time.Second*time.Duration(ctk.ExpiresIn)).After(time.Now().Add(tokenReservedTime)) {
-		return ctk.AccessToken, nil
-	}
-	k.mu.RUnlock()
-
-	k.mu.Lock()
-	defer k.mu.Unlock()
-	// get from ks-apiserver
-	data := url.Values{
-		"grant_type":    []string{"password"},
-		"client_id":     []string{"kubesphere"},
-		"client_secret": []string{"kubesphere"},
-		"username":      []string{k.config.Username},
-		"password":      []string{k.config.Password},
-	}
-	path, err := url.JoinPath(k.config.Host, "oauth/token")
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to join oauth/token path to %s", k.config.Host)
-	}
-	resp, err := http.Post(path, "application/x-www-form-urlencoded", strings.NewReader(data.Encode()))
-	if err != nil {
-		return "", errors.Wrap(err, "failed to post oauth/token request")
-	}
-	defer resp.Body.Close()
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to ready http response body")
-	}
-	tk := &token{}
-	if err := json.Unmarshal(respBody, tk); err != nil {
-		return "", errors.Wrap(err, "faield to unmarshal http response body")
-	}
-	k.tokenCache[k.config.Username] = tk
-
-	return tk.AccessToken, nil
+	return msg
 }
