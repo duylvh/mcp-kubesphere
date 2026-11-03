@@ -27,6 +27,9 @@ func TestPodLogArguments(t *testing.T) {
 		args map[string]any
 		want string
 	}{
+		{"get_pod", map[string]any{"cluster": "dev", "project": "p1"}, `argument "pod" is required`},
+		{"get_pod", map[string]any{"cluster": "dev", "pod": "svc-0"}, `argument "project" is required`},
+		{"get_pod", map[string]any{"cluster": "dev", "project": "p1", "pod": ".."}, "invalid name"},
 		{"get_pod_logs", map[string]any{"project": "p1", "pod": "svc-0"}, `argument "cluster" is required`},
 		{"get_pod_logs", map[string]any{"cluster": "dev", "pod": "svc-0"}, `argument "project" is required`},
 		{"get_pod_logs", map[string]any{"cluster": "dev", "project": "p1"}, `argument "pod" is required`},
@@ -83,4 +86,14 @@ func TestListEventsNewestFirst(t *testing.T) {
 		{"metadata":{"name":"b"},"reason":"Pulled","lastTimestamp":"2026-11-03T15:45:11Z"},
 		{"metadata":{"name":"a"},"reason":"Scheduled","lastTimestamp":null,"eventTime":"2026-11-03T15:45:05.123456Z"}],
 		"totalItems":4}`, text(res))
+}
+
+func TestGetPodKeepsStatusAndDropsNoise(t *testing.T) {
+	rec, ks := newRecorder(t)
+	rec.bodies["/kapis/clusters/dev/resources.kubesphere.io/v1alpha3/namespaces/p1/pods/svc-0"] = `{"metadata":{"name":"svc-0","managedFields":[{"manager":"m"}],"annotations":{"kubectl.kubernetes.io/last-applied-configuration":"{}","keep":"yes"}},
+		"status":{"phase":"Running","containerStatuses":[{"name":"app","ready":false,"restartCount":4,"state":{"waiting":{"reason":"CrashLoopBackOff"}},"lastState":{"terminated":{"exitCode":137,"reason":"OOMKilled"}}}]}}`
+	res := call(t, byName(ks), "get_pod", map[string]any{"cluster": "dev", "project": "p1", "pod": "svc-0"})
+	require.False(t, res.IsError, text(res))
+	assert.JSONEq(t, `{"metadata":{"name":"svc-0","annotations":{"keep":"yes"}},
+		"status":{"phase":"Running","containerStatuses":[{"name":"app","ready":false,"restartCount":4,"state":{"waiting":{"reason":"CrashLoopBackOff"}},"lastState":{"terminated":{"exitCode":137,"reason":"OOMKilled"}}}]}}`, text(res))
 }

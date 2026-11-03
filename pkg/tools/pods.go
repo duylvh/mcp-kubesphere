@@ -14,6 +14,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"github.com/duylvh/mcp-kubesphere/pkg/constants"
 	"github.com/duylvh/mcp-kubesphere/pkg/kubesphere"
 )
 
@@ -24,11 +25,26 @@ const (
 	defEventLimit = 20
 )
 
-// podTools read what the /kapis resource lists do not carry: container logs
-// and events. Both go through the Kubernetes core API that ks-apiserver
-// proxies per cluster.
+// podTools read one pod, and what the /kapis resource lists do not carry:
+// container logs and events, which go through the Kubernetes core API that
+// ks-apiserver proxies per cluster.
 func podTools(ks *kubesphere.KSConfig) []server.ServerTool {
 	return []server.ServerTool{
+		{Tool: newTool("get_pod", `
+Get one pod with its full spec and status. status holds:
+- phase, conditions (PodScheduled, Initialized, ContainersReady, Ready) with reason and message.
+- containerStatuses and initContainerStatuses: per container ready, restartCount, image, and
+  state / lastState (waiting with reason such as CrashLoopBackOff or ImagePullBackOff,
+  running with startedAt, terminated with exitCode, reason such as OOMKilled or Error, and finishedAt).
+- hostIP, podIP, startTime, qosClass.
+Find the pod with list_pods. The object omits metadata.managedFields and the
+kubectl.kubernetes.io/last-applied-configuration annotation; container env values are included.
+`,
+			clusterOption(true),
+			mcp.WithString("project", mcp.Description("the project (namespace) of the pod"), mcp.Required()),
+			mcp.WithString("pod", mcp.Description("the pod name, from list_pods"), mcp.Required()),
+		), Handler: handle(ks, podRoute, compactObject)},
+
 		{Tool: newTool("get_pod_logs", fmt.Sprintf(`
 Read the log of one container of a pod, as plain text, newest lines last.
 - Find the pod with list_pods (name or labelSelector app=<deployment>).
@@ -62,6 +78,23 @@ Kubernetes keeps events for about one hour.
 			mcp.WithNumber("limit", mcp.Description(fmt.Sprintf("Number of events returned. Default is %d", defEventLimit))),
 		), Handler: listEvents(ks)},
 	}
+}
+
+func podRoute(a args) (string, url.Values, error) {
+	cluster, err := a.need("cluster")
+	if err != nil {
+		return "", nil, err
+	}
+	project, err := a.need("project")
+	if err != nil {
+		return "", nil, err
+	}
+	pod, err := a.need("pod")
+	if err != nil {
+		return "", nil, err
+	}
+	p, err := kubesphere.KAPIPath(cluster, constants.ResourcesV1alpha3, "namespaces", project, "pods", pod)
+	return p, nil, err
 }
 
 func podLogsRoute(a args) (string, url.Values, error) {

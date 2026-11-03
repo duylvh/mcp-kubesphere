@@ -96,10 +96,7 @@ func compactList(body []byte) ([]byte, error) {
 		return body, nil
 	}
 	for _, item := range items {
-		metadata, _ := item["metadata"].(map[string]any)
-		delete(metadata, "managedFields")
-		annotations, _ := metadata["annotations"].(map[string]any)
-		delete(annotations, lastAppliedAnnotation)
+		compactItem(item)
 	}
 	compacted, err := json.Marshal(items)
 	if err != nil {
@@ -107,6 +104,23 @@ func compactList(body []byte) ([]byte, error) {
 	}
 	list["items"] = compacted
 	return json.Marshal(list)
+}
+
+func compactItem(item map[string]any) {
+	metadata, _ := item["metadata"].(map[string]any)
+	delete(metadata, "managedFields")
+	annotations, _ := metadata["annotations"].(map[string]any)
+	delete(annotations, lastAppliedAnnotation)
+}
+
+// compactObject applies compactList's trimming to a single object.
+func compactObject(body []byte) ([]byte, error) {
+	var item map[string]any
+	if json.Unmarshal(body, &item) != nil {
+		return body, nil
+	}
+	compactItem(item)
+	return json.Marshal(item)
 }
 
 // filterOptions narrow a list on the server, so a busy namespace does not
