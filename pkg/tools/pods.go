@@ -132,7 +132,8 @@ func podLogsRoute(a args) (string, url.Values, error) {
 }
 
 // trimLog keeps the newest maxLogBytes of a log, so the lines a caller is
-// most likely after survive. It cuts at a line start. When the kept part holds
+// most likely after survive. It cuts at the first line start in the newest
+// maxLogBytes, which may be the window's first byte. When the kept part holds
 // no complete line, it cuts at the next UTF-8 character start instead, looking
 // at most utf8.UTFMax-1 bytes ahead, so a valid character is never split and
 // output that is not UTF-8 is still returned rather than skipped.
@@ -141,8 +142,10 @@ func trimLog(body []byte) ([]byte, error) {
 		return body, nil
 	}
 	cut := len(body) - maxLogBytes
-	atLine := false
-	if i := bytes.IndexByte(body[cut:], '\n'); i >= 0 && cut+i+1 < len(body) {
+	// A cut right after a line break already starts a line; searching on
+	// would drop that line although it fits.
+	atLine := body[cut-1] == '\n'
+	if i := bytes.IndexByte(body[cut:], '\n'); !atLine && i >= 0 && cut+i+1 < len(body) {
 		cut += i + 1
 		atLine = true
 	}

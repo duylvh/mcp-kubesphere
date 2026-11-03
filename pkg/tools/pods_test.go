@@ -169,3 +169,16 @@ func TestTrimLogKeepsBytesThatAreNotUTF8(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, maxLogBytes-(utf8.UTFMax-1), len(kept), "the cut moves at most utf8.UTFMax-1 bytes")
 }
+
+func TestTrimLogKeepsALineThatStartsAtTheCut(t *testing.T) {
+	// 64-byte lines divide maxLogBytes, so the cut falls exactly on a line
+	// start and the newest maxLogBytes are whole lines.
+	line := strings.Repeat("z", 63) + "\n"
+	const lines = maxLogBytes/64 + 76
+	out, err := trimLog([]byte(strings.Repeat(line, lines)))
+	require.NoError(t, err)
+	note, kept, ok := strings.Cut(string(out), "]\n")
+	require.True(t, ok)
+	assert.Len(t, kept, maxLogBytes, "every line that fits is kept")
+	assert.Equal(t, fmt.Sprintf("[log trimmed: %d older bytes omitted; lower tailLines or use sinceSeconds", 76*64), note)
+}
