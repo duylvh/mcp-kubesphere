@@ -145,9 +145,11 @@ func trimLog(body []byte) ([]byte, error) {
 	// A cut right after a line break already starts a line; searching on
 	// would drop that line although it fits.
 	atLine := body[cut-1] == '\n'
-	if i := bytes.IndexByte(body[cut:], '\n'); !atLine && i >= 0 && cut+i+1 < len(body) {
-		cut += i + 1
-		atLine = true
+	if !atLine {
+		if i := bytes.IndexByte(body[cut:], '\n'); i >= 0 && cut+i+1 < len(body) {
+			cut += i + 1
+			atLine = true
+		}
 	}
 	for step := 0; !atLine && step < utf8.UTFMax-1 && cut < len(body) && !utf8.RuneStart(body[cut]); step++ {
 		cut++
