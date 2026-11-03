@@ -24,11 +24,13 @@ import (
 // attempt and the retry (up to cookieRefreshTimeout) is not cut short.
 var requestTimeout = 60 * time.Second
 
+// maxResponseSize bounds a response body; a var so tests can lower it.
+var maxResponseSize = 32 << 20
+
 const (
 	// URLEnvVar names the KubeSphere console or ks-apiserver address.
 	URLEnvVar = "KS_URL"
 
-	maxResponseSize = 32 << 20
 	maxErrorMessage = 300
 )
 
@@ -207,12 +209,12 @@ func (c *KSConfig) Get(ctx context.Context, path string, query url.Values) ([]by
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize+1))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(maxResponseSize)+1))
 	if err != nil {
 		return nil, fmt.Errorf("reading KubeSphere response for %s: %w", path, err)
 	}
 	if len(body) > maxResponseSize {
-		return nil, fmt.Errorf("KubeSphere response for %s exceeds %d MiB; use a smaller limit", path, maxResponseSize>>20)
+		return nil, fmt.Errorf("KubeSphere response for %s exceeds %d MiB%s", path, maxResponseSize>>20, tooLargeHint(query))
 	}
 	switch {
 	case resp.StatusCode >= 300 && resp.StatusCode < 400:
@@ -231,6 +233,15 @@ func (c *KSConfig) Get(ctx context.Context, path string, query url.Values) ([]by
 		return nil, fmt.Errorf("KubeSphere returned an HTML page instead of JSON for %s; this address does not serve that API path", path)
 	}
 	return body, nil
+}
+
+// tooLargeHint suggests a smaller page only for a request that pages, through
+// limit or OpenPitrix's paging; for any other, a smaller limit changes nothing.
+func tooLargeHint(query url.Values) string {
+	if query.Has("limit") || query.Has("paging") {
+		return "; use a smaller limit"
+	}
+	return ""
 }
 
 func redirectTarget(u *url.URL) string {

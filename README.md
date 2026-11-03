@@ -58,7 +58,7 @@ Without `KS_COOKIE_FILE`, pass `--ksconfig` with a kubeconfig-format file whose 
 | Clusters | `list_clusters`, `get_cluster`, `get_cluster_tags` (built from cluster labels), `list_cluster_members`, `list_projects` |
 | Cluster resources | `list_nodes`, `list_customresourcedefinitions`, `list_persistentvolumes`, `list_storageclasses` |
 | Project resources | `list_deployments`, `list_statefulsets`, `list_daemonsets`, `list_jobs`, `list_cronjobs`, `list_pods`, `list_services`, `list_ingresses`, `list_secrets`, `list_configmaps`, `list_serviceaccounts`, `list_persistentvolumeclaims` |
-| Pods | `get_pod` (full spec and status: phase, conditions, container states, restart counts), `get_pod_logs` (plain text, last `tailLines` lines, `previous` for the run before a restart), `list_events` (newest first, filtered by object `name` and `kind`) |
+| Pods | `get_pod` (full spec and status: phase, conditions, container states, restart counts), `get_pod_logs` (plain text, last `tailLines` lines, `previous` for the run before a restart), `list_events` (newest first, at most 200, filtered by object `name` and `kind`) |
 
 The `list_*` resource tools also take `name` (substring of the object name) and `labelSelector` (Kubernetes selector syntax), filtered by KubeSphere before the response is sent. Their items, and `get_pod`'s pod, omit `metadata.managedFields` and the `kubectl.kubernetes.io/last-applied-configuration` annotation.
 

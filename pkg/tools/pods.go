@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -23,6 +24,7 @@ const (
 	maxLogLines   = 2000
 	maxLogBytes   = 64 << 10
 	defEventLimit = 20
+	maxEventLimit = 200
 )
 
 // podTools read one pod, and what the /kapis resource lists do not carry:
@@ -64,18 +66,18 @@ A 403 means the signed-in user lacks permission to read pod logs in that project
 			mcp.WithBoolean("timestamps", mcp.Description("prefix each line with the time Kubernetes received it")),
 		), Handler: handle(ks, podLogsRoute, trimLog)},
 
-		{Tool: newTool("list_events", `
+		{Tool: newTool("list_events", fmt.Sprintf(`
 Retrieve the Kubernetes events of a project, newest first: scheduling, image pulls, probe failures,
 OOM kills, back-off restarts and scaling. The response will include:
-1. items: up to limit event objects (type, reason, message, count, involvedObject, firstTimestamp, lastTimestamp).
+1. items: up to limit (at most %[1]d) event objects (type, reason, message, count, involvedObject, firstTimestamp, lastTimestamp).
 2. totalItems: the number of events that matched, before limit.
-Kubernetes keeps events for about one hour.
-`,
+Kubernetes keeps events for about one hour. If a project has too many events, filter by name or kind.
+`, maxEventLimit),
 			clusterOption(true),
 			mcp.WithString("project", mcp.Description("the project (namespace)"), mcp.Required()),
 			mcp.WithString("name", mcp.Description("only events about the object with exactly this name, e.g. a pod name")),
 			mcp.WithString("kind", mcp.Description("only events about objects of this kind, e.g. Pod, Deployment, ReplicaSet, HorizontalPodAutoscaler")),
-			mcp.WithNumber("limit", mcp.Description(fmt.Sprintf("Number of events returned. Default is %d", defEventLimit))),
+			mcp.WithNumber("limit", mcp.Description(fmt.Sprintf("Number of events returned. Default is %d, at most %d", defEventLimit, maxEventLimit))),
 		), Handler: listEvents(ks)},
 	}
 }
@@ -129,8 +131,9 @@ func podLogsRoute(a args) (string, url.Values, error) {
 	return p, q, nil
 }
 
-// trimLog keeps the newest maxLogBytes of a log, cut at a line start, so the
-// lines a caller is most likely after survive.
+// trimLog keeps the newest maxLogBytes of a log, so the lines a caller is
+// most likely after survive. It cuts at a line start, or, when the kept part
+// holds no complete line, at a UTF-8 character start so no character is split.
 func trimLog(body []byte) ([]byte, error) {
 	if len(body) <= maxLogBytes {
 		return body, nil
@@ -138,6 +141,9 @@ func trimLog(body []byte) ([]byte, error) {
 	cut := len(body) - maxLogBytes
 	if i := bytes.IndexByte(body[cut:], '\n'); i >= 0 && cut+i+1 < len(body) {
 		cut += i + 1
+	}
+	for cut < len(body) && !utf8.RuneStart(body[cut]) {
+		cut++
 	}
 	note := fmt.Sprintf("[log trimmed: %d older bytes omitted; lower tailLines or use sinceSeconds]\n", cut)
 	return append([]byte(note), body[cut:]...), nil
@@ -180,7 +186,7 @@ func eventsRoute(a args) (string, url.Values, error) {
 func listEvents(ks *kubesphere.KSConfig) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		a := args(request.Params.Arguments)
-		limit := a.positive("limit", defEventLimit)
+		limit := min(a.positive("limit", defEventLimit), maxEventLimit)
 		return handle(ks, eventsRoute, func(body []byte) ([]byte, error) { return newestEvents(body, limit) })(ctx, request)
 	}
 }

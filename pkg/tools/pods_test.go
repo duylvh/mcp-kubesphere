@@ -1,8 +1,11 @@
 package tools
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -96,4 +99,47 @@ func TestGetPodKeepsStatusAndDropsNoise(t *testing.T) {
 	require.False(t, res.IsError, text(res))
 	assert.JSONEq(t, `{"metadata":{"name":"svc-0","annotations":{"keep":"yes"}},
 		"status":{"phase":"Running","containerStatuses":[{"name":"app","ready":false,"restartCount":4,"state":{"waiting":{"reason":"CrashLoopBackOff"}},"lastState":{"terminated":{"exitCode":137,"reason":"OOMKilled"}}}]}}`, text(res))
+}
+
+func TestListEventsLimitIsCapped(t *testing.T) {
+	rec, ks := newRecorder(t)
+	var items []string
+	for i := range 250 {
+		items = append(items, fmt.Sprintf(`{"metadata":{"name":"e%d"},"lastTimestamp":"2026-11-03T15:%02d:%02dZ"}`, i, i/60, i%60))
+	}
+	rec.bodies["/api/clusters/dev/v1/namespaces/p1/events"] = `{"items":[` + strings.Join(items, ",") + `]}`
+	res := call(t, byName(ks), "list_events", map[string]any{"cluster": "dev", "project": "p1", "limit": float64(1000)})
+	require.False(t, res.IsError, text(res))
+	var out struct {
+		Items      []map[string]any `json:"items"`
+		TotalItems int              `json:"totalItems"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(text(res)), &out))
+	assert.Len(t, out.Items, maxEventLimit)
+	assert.Equal(t, 250, out.TotalItems)
+	assert.Equal(t, "e249", out.Items[0]["metadata"].(map[string]any)["name"], "newest first")
+}
+
+func TestTrimLogNeverSplitsACharacter(t *testing.T) {
+	// One line with no newline, made of 2- and 3-byte characters so any
+	// byte offset is likely to fall inside a character.
+	line := strings.Repeat("é€", maxLogBytes/5+100)
+	for _, prefix := range []string{"", "x", "xy"} {
+		body := []byte(prefix + line)
+		out, err := trimLog(body)
+		require.NoError(t, err)
+		note, kept, ok := strings.Cut(string(out), "]\n")
+		require.True(t, ok, "starts with the trim note")
+		assert.True(t, strings.HasPrefix(note, "[log trimmed: "))
+		assert.True(t, utf8.ValidString(kept), "prefix %q: the kept part is valid UTF-8", prefix)
+		assert.True(t, strings.HasSuffix(string(body), kept), "the kept part is the end of the log")
+		assert.LessOrEqual(t, len(kept), maxLogBytes)
+		assert.GreaterOrEqual(t, len(kept), maxLogBytes-3)
+	}
+}
+
+func TestCompactObjectPassesNonJSONThrough(t *testing.T) {
+	out, err := compactObject([]byte("not json"))
+	require.NoError(t, err)
+	assert.Equal(t, "not json", string(out))
 }

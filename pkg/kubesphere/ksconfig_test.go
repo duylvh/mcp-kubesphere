@@ -3,6 +3,7 @@ package kubesphere
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -165,4 +166,35 @@ func TestOptionsFromEnv(t *testing.T) {
 	t.Setenv(CookieRefreshCommandEnvVar, `["refresh"]`)
 	_, err = OptionsFromEnv("", "")
 	require.ErrorContains(t, err, "requires "+CookieFileEnvVar)
+}
+
+func TestGetTooLargeAdvisesSmallerLimitOnlyWhenPaging(t *testing.T) {
+	saved := maxResponseSize
+	maxResponseSize = 16
+	t.Cleanup(func() { maxResponseSize = saved })
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"items":[1,2,3,4,5,6,7,8,9]}`))
+	}))
+	t.Cleanup(server.Close)
+	ks, _ := cookieKSConfig(t, server.URL, nil)
+
+	for _, tc := range []struct {
+		query url.Values
+		hint  bool
+	}{
+		{url.Values{"limit": {"10"}, "page": {"1"}}, true},
+		{url.Values{"paging": {"limit=10,page=1"}}, true},
+		{url.Values{"fieldSelector": {"involvedObject.name=svc-0"}}, false},
+		{nil, false},
+	} {
+		_, err := ks.Get(t.Context(), "/api/clusters/dev/v1/namespaces/p1/events", tc.query)
+		require.Error(t, err, "%v", tc.query)
+		assert.Contains(t, err.Error(), "exceeds")
+		if tc.hint {
+			assert.Contains(t, err.Error(), "use a smaller limit", "%v", tc.query)
+		} else {
+			assert.NotContains(t, err.Error(), "limit", "%v", tc.query)
+		}
+	}
 }
