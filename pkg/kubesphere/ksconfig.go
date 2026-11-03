@@ -146,8 +146,23 @@ func loadKSConfig(path string) (*restclient.Config, error) {
 // cluster). Each segment is a single path element; user-supplied names that
 // could change the path, such as "..", are rejected.
 func KAPIPath(cluster, groupVersion string, segments ...string) (string, error) {
+	return buildPath("/kapis", cluster, groupVersion, segments...)
+}
+
+// CoreV1Path builds "/api/clusters/{cluster}/v1/{segments...}", the Kubernetes
+// core API that ks-apiserver proxies to a member cluster, for objects the
+// /kapis API does not serve, such as pod logs and events. The cluster is
+// required: the host form "/api/v1" is a different cluster.
+func CoreV1Path(cluster string, segments ...string) (string, error) {
+	if cluster == "" {
+		return "", errors.New(`argument "cluster" is required`)
+	}
+	return buildPath("/api", cluster, "v1", segments...)
+}
+
+func buildPath(prefix, cluster, groupVersion string, segments ...string) (string, error) {
 	var b strings.Builder
-	b.WriteString("/kapis")
+	b.WriteString(prefix)
 	if cluster != "" {
 		if err := checkSegment("cluster", cluster); err != nil {
 			return "", err
@@ -174,9 +189,10 @@ func checkSegment(kind, s string) error {
 	return nil
 }
 
-// Get requests path (from KAPIPath) with query and returns the JSON body.
+// Get requests path (from KAPIPath or CoreV1Path) with query and returns the
+// body: JSON, or plain text for pod logs.
 func (c *KSConfig) Get(ctx context.Context, path string, query url.Values) ([]byte, error) {
-	// path is already escaped by KAPIPath.
+	// path is already escaped by KAPIPath or CoreV1Path.
 	target := c.baseURL.String() + path
 	if q := query.Encode(); q != "" {
 		target += "?" + q

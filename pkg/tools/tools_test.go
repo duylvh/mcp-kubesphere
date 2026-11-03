@@ -93,8 +93,8 @@ func byName(ks *kubesphere.KSConfig) map[string]server.ServerTool {
 func TestToolSet(t *testing.T) {
 	_, ks := newRecorder(t)
 	tools := byName(ks)
-	assert.Len(t, tools, 34)
-	assert.Len(t, All(ks), 34, "no tool is registered twice")
+	assert.Len(t, tools, 36)
+	assert.Len(t, All(ks), 36, "no tool is registered twice")
 	for _, removed := range []string{"list_extensions", "list_permissions"} {
 		assert.NotContains(t, tools, removed, "4.x-only tool %s is not offered", removed)
 	}
@@ -140,6 +140,11 @@ func TestToolPaths(t *testing.T) {
 		{"list_cluster_members", map[string]any{"cluster": "dev"}, "/kapis/clusters/dev/iam.kubesphere.io/v1alpha2/clustermembers" + paging + "createTime"},
 		{"list_projects", map[string]any{"cluster": "dev"}, "/kapis/clusters/dev/resources.kubesphere.io/v1alpha3/namespaces" + paging + "name"},
 		{"list_projects", map[string]any{"cluster": "dev", "workspace": "team-ws"}, "/kapis/clusters/dev/tenant.kubesphere.io/v1alpha2/workspaces/team-ws/namespaces" + paging + "createTime"},
+
+		// Logs and events come from the Kubernetes core API that ks-apiserver
+		// proxies per cluster; the host form /api/v1 is a different cluster.
+		{"get_pod_logs", map[string]any{"cluster": "dev", "project": "p1", "pod": "svc-0"}, "/api/clusters/dev/v1/namespaces/p1/pods/svc-0/log?tailLines=100"},
+		{"list_events", nsArgs, "/api/clusters/dev/v1/namespaces/team-project/events"},
 	}
 	for _, r := range clusterResources {
 		cases = append(cases, struct {

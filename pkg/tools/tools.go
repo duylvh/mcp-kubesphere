@@ -24,6 +24,7 @@ func All(ks *kubesphere.KSConfig) []server.ServerTool {
 	tools = append(tools, applicationTools(ks)...)
 	tools = append(tools, clusterTools(ks)...)
 	tools = append(tools, resourceTools(ks)...)
+	tools = append(tools, podTools(ks)...)
 	return tools
 }
 
@@ -41,6 +42,17 @@ func (a args) need(name string) (string, error) {
 		return "", fmt.Errorf("argument %q is required", name)
 	}
 	return s, nil
+}
+
+// boolean reads a JSON boolean, or the string "true".
+func (a args) boolean(name string) bool {
+	switch v := a[name].(type) {
+	case bool:
+		return v
+	case string:
+		return v == "true"
+	}
+	return false
 }
 
 // positive returns a whole number argument, or def when it is absent or not a

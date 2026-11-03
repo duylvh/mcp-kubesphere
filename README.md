@@ -58,8 +58,11 @@ Without `KS_COOKIE_FILE`, pass `--ksconfig` with a kubeconfig-format file whose 
 | Clusters | `list_clusters`, `get_cluster`, `get_cluster_tags` (built from cluster labels), `list_cluster_members`, `list_projects` |
 | Cluster resources | `list_nodes`, `list_customresourcedefinitions`, `list_persistentvolumes`, `list_storageclasses` |
 | Project resources | `list_deployments`, `list_statefulsets`, `list_daemonsets`, `list_jobs`, `list_cronjobs`, `list_pods`, `list_services`, `list_ingresses`, `list_secrets`, `list_configmaps`, `list_serviceaccounts`, `list_persistentvolumeclaims` |
+| Pods | `get_pod_logs` (plain text, last `tailLines` lines, `previous` for the run before a restart), `list_events` (newest first, filtered by object `name` and `kind`) |
 
 The `list_*` resource tools also take `name` (substring of the object name) and `labelSelector` (Kubernetes selector syntax), filtered by KubeSphere before the response is sent. Their items omit `metadata.managedFields` and the `kubectl.kubernetes.io/last-applied-configuration` annotation.
+
+`get_pod_logs` and `list_events` read the Kubernetes core API that ks-apiserver proxies at `/api/clusters/{cluster}/v1/...`, so they need `cluster` and `project`. A log over 64 KiB keeps its newest lines.
 
 Most tools take a `cluster` argument. A workspace's projects live on the clusters in `get_workspace` → `spec.placement.clusters`.
 
@@ -68,6 +71,7 @@ A 403 from KubeSphere is passed through unchanged. It means the signed-in user l
 ### What is and is not redacted
 
 - `list_secrets` rebuilds each secret from an allowlist: its identity, type and labels, KubeSphere's display annotations, and `dataKeys` (the sorted key names). Values, other annotations and managed fields are never returned. A response of any other shape is withheld.
+- `get_pod_logs` returns log lines as the application wrote them.
 - Other tools return what KubeSphere returns, as `kubectl get -o json` would. This includes container `env` values in workload lists and Helm values in `get_application`.
 
 ## Tests
