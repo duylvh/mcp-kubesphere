@@ -59,6 +59,8 @@ Without `KS_COOKIE_FILE`, pass `--ksconfig` with a kubeconfig-format file whose 
 | Cluster resources | `list_nodes`, `list_customresourcedefinitions`, `list_persistentvolumes`, `list_storageclasses` |
 | Project resources | `list_deployments`, `list_statefulsets`, `list_daemonsets`, `list_jobs`, `list_cronjobs`, `list_pods`, `list_services`, `list_ingresses`, `list_secrets`, `list_configmaps`, `list_serviceaccounts`, `list_persistentvolumeclaims` |
 
+The `list_*` resource tools also take `name` (substring of the object name) and `labelSelector` (Kubernetes selector syntax), filtered by KubeSphere before the response is sent. Their items omit `metadata.managedFields` and the `kubectl.kubernetes.io/last-applied-configuration` annotation.
+
 Most tools take a `cluster` argument. A workspace's projects live on the clusters in `get_workspace` → `spec.placement.clusters`.
 
 A 403 from KubeSphere is passed through unchanged. It means the signed-in user lacks that permission, for example for platform roles, CRDs or persistent volumes.

@@ -208,6 +208,29 @@ func TestToolArguments(t *testing.T) {
 	assert.Len(t, rec.uris, before, "invalid arguments never reach KubeSphere")
 }
 
+func TestResourceFilters(t *testing.T) {
+	rec, ks := newRecorder(t)
+	tools := byName(ks)
+
+	call(t, tools, "list_pods", map[string]any{"cluster": "prod-3", "project": "team-project", "labelSelector": "app=svc,tier in (api)"})
+	assert.Equal(t, "/kapis/clusters/prod-3/resources.kubesphere.io/v1alpha3/namespaces/team-project/pods?labelSelector=app%3Dsvc%2Ctier+in+%28api%29&limit=10&page=1&sortBy=name", rec.last())
+
+	call(t, tools, "list_deployments", map[string]any{"cluster": "prod-3", "project": "team-project", "name": "svc"})
+	assert.Equal(t, "/kapis/clusters/prod-3/resources.kubesphere.io/v1alpha3/namespaces/team-project/deployments?limit=10&name=svc&page=1&sortBy=name", rec.last())
+
+	call(t, tools, "list_nodes", map[string]any{"cluster": "dev", "labelSelector": "node-role.kubernetes.io/worker"})
+	assert.Equal(t, "/kapis/clusters/dev/resources.kubesphere.io/v1alpha3/nodes?labelSelector=node-role.kubernetes.io%2Fworker&limit=10&page=1&sortBy=name", rec.last())
+}
+
+func TestListsAreCompacted(t *testing.T) {
+	rec, ks := newRecorder(t)
+	rec.bodies["/kapis/clusters/dev/resources.kubesphere.io/v1alpha3/namespaces/p1/deployments"] = `{"items":[{"metadata":{"name":"svc","managedFields":[{"manager":"m"}],"annotations":{"kubectl.kubernetes.io/last-applied-configuration":"{\"env\":\"S3CRET\"}","keep":"yes"}},"spec":{"replicas":2}}],"totalItems":1}`
+	out := text(call(t, byName(ks), "list_deployments", map[string]any{"cluster": "dev", "project": "p1"}))
+	assert.NotContains(t, out, "managedFields")
+	assert.NotContains(t, out, "S3CRET")
+	assert.JSONEq(t, `{"items":[{"metadata":{"name":"svc","annotations":{"keep":"yes"}},"spec":{"replicas":2}}],"totalItems":1}`, out)
+}
+
 func TestClusterTags(t *testing.T) {
 	rec, ks := newRecorder(t)
 	rec.bodies["/kapis/resources.kubesphere.io/v1alpha3/clusters"] = `{"items":[
