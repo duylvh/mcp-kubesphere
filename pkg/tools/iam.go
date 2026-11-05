@@ -13,28 +13,13 @@ import (
 
 func iamTools(ks *kubesphere.KSConfig) []server.ServerTool {
 	return []server.ServerTool{
-		tool(ks, newTool("list_users", `
-Retrieve the paginated users list. The response will include:
-1. items: An array of user objects containing:
-  - username: Maps to metadata.name
-  - email: Maps to spec.email
-  - specific metadata.annotations fields indicate:
-   - iam.kubesphere.io/globalrole: the platform role of the user.
-   - iam.kubesphere.io/last-login-time: the last login time of the user.
-2. totalItems: The total number of users in KubeSphere.
-`, pagingOptions("users")...),
+		tool(ks, newTool("list_users", "List KubeSphere users: {items, totalItems}, paged. metadata.name is the username, spec.email the email; annotations iam.kubesphere.io/globalrole (platform role) and iam.kubesphere.io/last-login-time.", pagingOptions("users")...),
 			func(a args) (string, url.Values, error) {
 				p, err := kubesphere.KAPIPath("", constants.IAMV1alpha2, "users")
 				return p, a.paging("createTime"), err
 			}),
 
-		tool(ks, newTool("get_user", `
-Get user information. The response will contain:
-- username: Maps to metadata.name
-- email: Maps to spec.email
-- specific metadata.annotations fields indicate:
- - iam.kubesphere.io/globalrole: the platform role of the user.
-`, mcp.WithString("user", mcp.Description("the given username"), mcp.Required())),
+		tool(ks, newTool("get_user", "Get one user: metadata.name, spec.email, and the platform role in annotation iam.kubesphere.io/globalrole.", mcp.WithString("user", mcp.Description("the given username"), mcp.Required())),
 			func(a args) (string, url.Values, error) {
 				user, err := a.need("user")
 				if err != nil {
@@ -44,35 +29,22 @@ Get user information. The response will contain:
 				return p, nil, err
 			}),
 
-		tool(ks, newTool("list_roles", `
-Retrieve the paginated roles list of one level. The response will include:
-1. items: An array of role objects containing:
-  - roleName: Maps to metadata.name
-  - rules: the Kubernetes RBAC rules of the role.
-  - specific metadata.annotations fields indicate:
-   - iam.kubesphere.io/aggregation-roles: the role templates the role aggregates.
-2. totalItems: The total number of roles in KubeSphere.
-A normal user may get 403 for platform or workspace roles; that is RBAC, not an error in this tool.
-`, append(pagingOptions("roles"),
-			mcp.WithString("level", mcp.Description("role level. it's four level: global (platform-level), cluster (cluster-level), workspace (workspace-level), namespace (project-level)"), mcp.Required()),
-			mcp.WithString("cluster", mcp.Description("the given clusterName which role belong to. require when level is cluster or namespace.")),
-			mcp.WithString("workspace", mcp.Description("role in which workspace. require when level is workspace.")),
-			mcp.WithString("project", mcp.Description("role in which project. require when level is namespace.")),
+		tool(ks, newTool("list_roles", "List the roles of one level: {items, totalItems}, paged. Each has metadata.name, its RBAC rules, and the role templates it aggregates in annotation iam.kubesphere.io/aggregation-roles. A normal user may get 403 for platform or workspace roles.", append(pagingOptions("roles"),
+			mcp.WithString("level", mcp.Description("global (platform), cluster, workspace, or namespace (project)"), mcp.Required()),
+			mcp.WithString("cluster", mcp.Description("required for level cluster or namespace")),
+			mcp.WithString("workspace", mcp.Description("required for level workspace")),
+			mcp.WithString("project", mcp.Description("required for level namespace")),
 		)...),
 			func(a args) (string, url.Values, error) {
 				p, err := rolePath(a, "")
 				return p, a.paging("createTime"), err
 			}),
 
-		tool(ks, newTool("get_role", `
-Get role information of one level. The response will contain:
-- roleName: Maps to metadata.name
-- rules: the Kubernetes RBAC rules of the role.
-`,
-			mcp.WithString("level", mcp.Description("role level. it's four level: global (platform-level), cluster (cluster-level), workspace (workspace-level), namespace (project-level)"), mcp.Required()),
-			mcp.WithString("cluster", mcp.Description("the given clusterName which role belong to. require when level is cluster or namespace.")),
-			mcp.WithString("workspace", mcp.Description("role in which workspace. require when level is workspace.")),
-			mcp.WithString("project", mcp.Description("role in which project. require when level is namespace.")),
+		tool(ks, newTool("get_role", "Get one role of a level: metadata.name and its RBAC rules.",
+			mcp.WithString("level", mcp.Description("global (platform), cluster, workspace, or namespace (project)"), mcp.Required()),
+			mcp.WithString("cluster", mcp.Description("required for level cluster or namespace")),
+			mcp.WithString("workspace", mcp.Description("required for level workspace")),
+			mcp.WithString("project", mcp.Description("required for level namespace")),
 			mcp.WithString("rolename", mcp.Description("the given rolename"), mcp.Required()),
 		),
 			func(a args) (string, url.Values, error) {

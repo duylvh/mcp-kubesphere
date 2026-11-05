@@ -117,12 +117,12 @@ func tool(ks *kubesphere.KSConfig, t mcp.Tool, r route) server.ServerTool {
 
 func pagingOptions(noun string) []mcp.ToolOption {
 	return []mcp.ToolOption{
-		mcp.WithNumber("limit", mcp.Description(fmt.Sprintf("Number of %s displayed at once. Default is %d", noun, constants.DefLimit))),
-		mcp.WithNumber("page", mcp.Description(fmt.Sprintf("Page number of %s to display. Default is %d", noun, constants.DefPage))),
+		mcp.WithNumber("limit", mcp.Description(fmt.Sprintf("%s per page, default %d", noun, constants.DefLimit))),
+		mcp.WithNumber("page", mcp.Description(fmt.Sprintf("page number, default %d", constants.DefPage))),
 	}
 }
 
-const clusterHelp = "the given clusterName, e.g. host or a member cluster. Use list_clusters to find names; a workspace's projects live on the clusters in get_workspace spec.placement.clusters"
+const clusterHelp = "cluster name, from list_clusters"
 
 func clusterOption(required bool) mcp.ToolOption {
 	if required {

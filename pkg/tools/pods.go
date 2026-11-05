@@ -33,14 +33,14 @@ const (
 func podTools(ks *kubesphere.KSConfig) []server.ServerTool {
 	return []server.ServerTool{
 		{Tool: newTool("get_pod", `
-Get one pod with its full spec and status. status holds:
+Get one pod with its full spec and status. For a failing pod, read this first, then list_events with name=<pod>,
+then get_pod_logs (previous=true for a crash loop). status holds:
 - phase, conditions (PodScheduled, Initialized, ContainersReady, Ready) with reason and message.
 - containerStatuses and initContainerStatuses: per container ready, restartCount, image, and
   state / lastState (waiting with reason such as CrashLoopBackOff or ImagePullBackOff,
   running with startedAt, terminated with exitCode, reason such as OOMKilled or Error, and finishedAt).
 - hostIP, podIP, startTime, qosClass.
-Find the pod with list_pods. The object omits metadata.managedFields and the
-kubectl.kubernetes.io/last-applied-configuration annotation; container env values are included.
+Container env values are included.
 `,
 			clusterOption(true),
 			mcp.WithString("project", mcp.Description("the project (namespace) of the pod"), mcp.Required()),
@@ -54,7 +54,6 @@ Read the log of one container of a pod, as plain text, newest lines last.
 - previous=true reads the container's last terminated run, the one to read for a crash loop.
 - Returns the last tailLines lines (default %[1]d, at most %[2]d). Output over %[3]d KiB keeps its newest lines and starts with a note that older lines were cut.
 Log lines are returned as written by the application and may contain sensitive data.
-A 403 means the signed-in user lacks permission to read pod logs in that project.
 `, defLogLines, maxLogLines, maxLogBytes>>10),
 			clusterOption(true),
 			mcp.WithString("project", mcp.Description("the project (namespace) of the pod"), mcp.Required()),
@@ -93,7 +92,7 @@ func podRoute(a args) (string, url.Values, error) {
 	}
 	pod, err := a.need("pod")
 	if err != nil {
-		return "", nil, err
+		return "", nil, fmt.Errorf("%w: the pod name, from list_pods with name or labelSelector app=<deployment>", err)
 	}
 	p, err := kubesphere.KAPIPath(cluster, constants.ResourcesV1alpha3, "namespaces", project, "pods", pod)
 	return p, nil, err
@@ -110,7 +109,7 @@ func podLogsRoute(a args) (string, url.Values, error) {
 	}
 	pod, err := a.need("pod")
 	if err != nil {
-		return "", nil, err
+		return "", nil, fmt.Errorf("%w: the pod name, from list_pods with name or labelSelector app=<deployment>", err)
 	}
 	p, err := kubesphere.CoreV1Path(cluster, "namespaces", project, "pods", pod, "log")
 	if err != nil {

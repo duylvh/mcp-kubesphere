@@ -102,7 +102,7 @@ func TestGetDoesNotFollowRedirects(t *testing.T) {
 	ks, _ := cookieKSConfig(t, server.URL, nil)
 
 	_, err := ks.Get(t.Context(), "/kapis/x", nil)
-	require.ErrorContains(t, err, "redirected /kapis/x to "+server.URL+"/login; the session is not signed in")
+	require.ErrorContains(t, err, "redirected /kapis/x to "+server.URL+"/login; the session is not signed in. Ask the user to sign in to")
 	assert.Zero(t, landed, "the login page is never fetched as data")
 }
 

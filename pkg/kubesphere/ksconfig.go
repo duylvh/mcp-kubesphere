@@ -219,13 +219,16 @@ func (c *KSConfig) Get(ctx context.Context, path string, query url.Values) ([]by
 	switch {
 	case resp.StatusCode >= 300 && resp.StatusCode < 400:
 		loc, _ := req.URL.Parse(resp.Header.Get("Location"))
-		return nil, fmt.Errorf("KubeSphere redirected %s to %s; the session is not signed in", path, redirectTarget(loc))
+		return nil, fmt.Errorf("KubeSphere redirected %s to %s; the session is not signed in. Ask the user to sign in to %s in Google Chrome once, then retry", path, redirectTarget(loc), c.baseURL.Host)
 	}
 	mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		msg := "(HTML page)"
 		if mediaType != "text/html" {
 			msg = errorMessage(body)
+		}
+		if resp.StatusCode == http.StatusForbidden {
+			msg += ". The signed-in user lacks this permission in KubeSphere: report it, do not retry or look for another route"
 		}
 		return nil, fmt.Errorf("KubeSphere returned %d for %s: %s", resp.StatusCode, path, msg)
 	}

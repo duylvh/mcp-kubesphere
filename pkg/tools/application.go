@@ -15,14 +15,7 @@ import (
 // installed from it.
 func applicationTools(ks *kubesphere.KSConfig) []server.ServerTool {
 	return []server.ServerTool{
-		tool(ks, newTool("list_application_repos", `
-Retrieve the paginated application repositories list of a workspace. The response will include:
-1. items: An array of repository objects containing:
-  - repo_id: the repository id.
-  - name: the repository name.
-  - url: the Helm repository URL.
-2. total_count: The total number of application repositories.
-`, append(pagingOptions("application repositories"),
+		tool(ks, newTool("list_application_repos", "List a workspace's Helm app repositories: {items (repo_id, name, url), total_count}, paged.", append(pagingOptions("application repositories"),
 			mcp.WithString("workspaceName", mcp.Description("the given workspaceName"), mcp.Required()))...),
 			func(a args) (string, url.Values, error) {
 				ws, err := a.need("workspaceName")
@@ -33,15 +26,7 @@ Retrieve the paginated application repositories list of a workspace. The respons
 				return p, openPitrixPaging(a), err
 			}),
 
-		tool(ks, newTool("list_applications", `
-Retrieve the paginated list of applications installed from app templates in a project. The response will include:
-1. items: An array of application objects containing:
-  - cluster.cluster_id: the application id used by get_application.
-  - cluster.name: the application name.
-  - version: the installed app version, with version_id and name.
-  - app: the app template, with app_id used by get_application_version.
-2. total_count: The total number of applications.
-`, append(pagingOptions("applications"),
+		tool(ks, newTool("list_applications", "List the apps installed from app templates in a project: {items, total_count}, paged. cluster.cluster_id is the id for get_application; app.app_id is the id for get_application_version.", append(pagingOptions("applications"),
 			mcp.WithString("workspace", mcp.Description("the given workspaceName which the project belongs to"), mcp.Required()),
 			clusterOption(true),
 			mcp.WithString("project", mcp.Description("the given projectName"), mcp.Required()))...),
@@ -50,12 +35,7 @@ Retrieve the paginated list of applications installed from app templates in a pr
 				return p, openPitrixPaging(a), err
 			}),
 
-		tool(ks, newTool("get_application", `
-Get an application installed from an app template. The response will contain:
-- cluster: the application, with cluster_id, name, status and env.
-- version: the installed app version.
-- app: the app template.
-`,
+		tool(ks, newTool("get_application", "Get an app installed from an app template: cluster (id, name, status, env), the installed version, and the app template.",
 			mcp.WithString("workspace", mcp.Description("the given workspaceName which the project belongs to"), mcp.Required()),
 			clusterOption(true),
 			mcp.WithString("project", mcp.Description("the given projectName"), mcp.Required()),
@@ -70,14 +50,7 @@ Get an application installed from an app template. The response will contain:
 				return p, nil, err
 			}),
 
-		tool(ks, newTool("get_application_version", `
-Retrieve the paginated versions list of an app template. The response will include:
-1. items: An array of app version objects containing:
-  - version_id: the version id.
-  - name: the chart version and app version.
-  - status: the review status of the version.
-2. total_count: The total number of versions.
-`, append(pagingOptions("application versions"),
+		tool(ks, newTool("get_application_version", "List the versions of an app template: {items (version_id, name, review status), total_count}, paged.", append(pagingOptions("application versions"),
 			mcp.WithString("applicationName", mcp.Description("the app template id (app.app_id), e.g. app-xxxx"), mcp.Required()))...),
 			func(a args) (string, url.Values, error) {
 				app, err := a.need("applicationName")

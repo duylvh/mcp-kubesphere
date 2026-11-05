@@ -88,7 +88,8 @@ func newMCPServer(ksconfigPath, apiserver string) (*server.MCPServer, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := server.NewMCPServer("KubeSphere", version.Get().GitVersion)
+	s := server.NewMCPServer("KubeSphere", version.Get().GitVersion,
+		server.WithInstructions("Read-only view of KubeSphere as the signed-in user; nothing here can change a cluster."))
 	s.SetTools(tools.All(ksconfig)...)
 	return s, nil
 }

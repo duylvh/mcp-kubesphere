@@ -1,9 +1,11 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -24,33 +26,22 @@ var clusterResources = []string{"nodes", "customresourcedefinitions", "persisten
 func resourceTools(ks *kubesphere.KSConfig) []server.ServerTool {
 	var tools []server.ServerTool
 	for _, resource := range clusterResources {
-		tools = append(tools, filteredTool(ks, newTool("list_"+resource, fmt.Sprintf(`
-Retrieve the paginated %[1]s list of a cluster. The response will include:
-1. items: An array of %[1]s objects containing:
-the item actual is %[1]s resource in kubernetes.
-2. totalItems: The total number of %[1]s in the cluster.
-A normal user may get 403 for cluster-scoped resources; that is RBAC, not an error in this tool.
-`, resource), append(append(pagingOptions(resource), filterOptions(resource)...), clusterOption(true))...),
+		tools = append(tools, filteredTool(ks, newTool("list_"+resource, fmt.Sprintf(
+			"List the %s of a cluster as Kubernetes objects: {items, totalItems}, paged. Cluster-scoped, so a normal user may get 403.", resource), append(append(pagingOptions(resource), filterOptions(resource)...), clusterOption(true))...),
 			resourceRoute(resource, false), compactList))
 	}
 	for _, resource := range projectResources {
-		description := fmt.Sprintf(`
-Retrieve the paginated %[1]s list. The response will include:
-1. items: An array of %[1]s objects containing:
-the item actual is %[1]s resource in kubernetes.
-2. totalItems: The total number of %[1]s in KubeSphere.
-`, resource)
+		description := fmt.Sprintf(
+			"List %s as Kubernetes objects: {items, totalItems}, paged. In a busy project, narrow with name or labelSelector.", resource)
 		post := compactList
 		if resource == "secrets" {
-			description += `Secret values are never returned: data and stringData are replaced by dataKeys, the sorted key names,
-and the kubectl.kubernetes.io/last-applied-configuration annotation is removed.
-`
+			description += " Values are never returned: data and stringData become dataKeys, the sorted key names."
 			post = redactSecretList
 		}
 		t := newTool("list_"+resource, description, append(append(pagingOptions(resource), filterOptions(resource)...),
 			clusterOption(true),
-			mcp.WithString("project", mcp.Description("the given projectName, if empty will return all project "+resource)))...)
-		tools = append(tools, server.ServerTool{Tool: t, Handler: handle(ks, resourceRoute(resource, true), post)})
+			mcp.WithString("project", mcp.Description("the project (namespace). Omitted, every project is listed, which needs cluster-wide permission")))...)
+		tools = append(tools, server.ServerTool{Tool: t, Handler: projectHint(handle(ks, resourceRoute(resource, true), post))})
 	}
 	return tools
 }
@@ -73,6 +64,23 @@ func resourceRoute(resource string, namespaced bool) route {
 			}
 		}
 		return p, q, err
+	}
+}
+
+// projectHint turns a 403 on a cluster-wide list into the call that usually
+// works: most users may read only the projects they belong to.
+func projectHint(h server.ToolHandlerFunc) server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		res, err := h(ctx, request)
+		if err != nil || res == nil || !res.IsError || args(request.Params.Arguments).str("project") != "" {
+			return res, err
+		}
+		for _, c := range res.Content {
+			if tc, ok := c.(mcp.TextContent); ok && strings.Contains(tc.Text, "returned 403") {
+				return mcp.NewToolResultError(tc.Text + "; pass project to list one project you can read"), nil
+			}
+		}
+		return res, err
 	}
 }
 
@@ -128,7 +136,7 @@ func compactObject(body []byte) ([]byte, error) {
 // labelSelector takes Kubernetes selector syntax.
 func filterOptions(resource string) []mcp.ToolOption {
 	return []mcp.ToolOption{
-		mcp.WithString("name", mcp.Description("only "+resource+" whose name contains this text, e.g. my-service")),
-		mcp.WithString("labelSelector", mcp.Description("only "+resource+" matching this Kubernetes label selector, e.g. app=my-service")),
+		mcp.WithString("name", mcp.Description("only names containing this text")),
+		mcp.WithString("labelSelector", mcp.Description("Kubernetes label selector, e.g. app=my-service")),
 	}
 }

@@ -17,29 +17,13 @@ import (
 
 func clusterTools(ks *kubesphere.KSConfig) []server.ServerTool {
 	return []server.ServerTool{
-		{Tool: newTool("list_clusters", `
-Retrieve the paginated clusters list. The response will include:
-1. items: An array of clusters objects containing:
-  - clusterName: Maps to metadata.name
-  - specific metadata.labels fields indicate:
-   - cluster-role.kubesphere.io/host: the cluster role is host.
-   - cluster-role.kubesphere.io/edge: the cluster is edge cluster which deploy in edge node.
-   - other labels are the tags of the cluster (see get_cluster_tags).
-2. totalItems: The total number of clusters in KubeSphere.
-`, pagingOptions("clusters")...),
+		{Tool: newTool("list_clusters", "List clusters: {items, totalItems}, paged. metadata.name is the cluster name; label cluster-role.kubesphere.io/host marks the host cluster, and other labels are tags (see get_cluster_tags).", pagingOptions("clusters")...),
 			Handler: handle(ks, func(a args) (string, url.Values, error) {
 				p, err := kubesphere.KAPIPath("", constants.ResourcesV1alpha3, "clusters")
 				return p, a.paging("createTime"), err
 			}, stripClusterCredentials)},
 
-		{Tool: newTool("get_cluster", `
-Get cluster information. The response will contain:
-- clusterName: Maps metadata.name
-- specific metadata.labels fields indicate:
- - cluster-role.kubesphere.io/host: the cluster role is host.
- - cluster-role.kubesphere.io/edge: the cluster is edge cluster which deploy in edge node.
-- status.kubernetesVersion and status.nodeCount describe the cluster.
-`, mcp.WithString("cluster", mcp.Description("the given clusterName"), mcp.Required())),
+		{Tool: newTool("get_cluster", "Get one cluster: metadata.name, role labels (cluster-role.kubesphere.io/host or /edge), status.kubernetesVersion and status.nodeCount.", mcp.WithString("cluster", mcp.Description("the given clusterName"), mcp.Required())),
 			Handler: handle(ks, func(a args) (string, url.Values, error) {
 				cluster, err := a.need("cluster")
 				if err != nil {
@@ -50,22 +34,11 @@ Get cluster information. The response will contain:
 			}, stripClusterCredentials)},
 
 		{
-			Tool: newTool("get_cluster_tags", `
-Retrieve the cluster tags map, built from the labels of every cluster. The response will include:
-- map key is label key
-- map value is a map from each label value to the clusters carrying it.
-`),
+			Tool:    newTool("get_cluster_tags", "Map each cluster label key to its values and the clusters carrying each."),
 			Handler: clusterTags(ks),
 		},
 
-		tool(ks, newTool("list_cluster_members", `
-Retrieve the paginated cluster members list. The response will include:
-1. items: An array of cluster member objects containing:
-  - username: Maps to metadata.name
-  - specific metadata.annotations fields indicate:
-   - iam.kubesphere.io/clusterrole: the cluster role which this user belong to.
-2. totalItems: The total number of cluster members in KubeSphere.
-`, append(pagingOptions("cluster members"), clusterOption(true))...),
+		tool(ks, newTool("list_cluster_members", "List a cluster's members: {items, totalItems}, paged. metadata.name is the username; annotation iam.kubesphere.io/clusterrole is the role.", append(pagingOptions("cluster members"), clusterOption(true))...),
 			func(a args) (string, url.Values, error) {
 				cluster, err := a.need("cluster")
 				if err != nil {
@@ -75,17 +48,7 @@ Retrieve the paginated cluster members list. The response will include:
 				return p, a.paging("createTime"), err
 			}),
 
-		tool(ks, newTool("list_projects", `
-Get project from cluster or workspace.
-when Get from cluster. should set cluster param.
-when Get from workspace. should set workspace and cluster which has assign to this workspace.
-Retrieve the paginated projects list. The response will include:
-1. items: An array of projects objects containing:
-the item actual is namespace resource in kubernetes.
-  - specific metadata.labels fields indicate:
-   - kubesphere.io/workspace: the workspace the project belongs to.
-2. totalItems: The total number of projects in KubeSphere.
-`, append(pagingOptions("projects"),
+		tool(ks, newTool("list_projects", "List the projects (namespaces) of a cluster: {items, totalItems}, paged; label kubesphere.io/workspace names each project's workspace. With workspace, only that workspace's projects the signed-in user is a member of.", append(pagingOptions("projects"),
 			clusterOption(true),
 			mcp.WithString("workspace", mcp.Description("the given workspaceName")))...),
 			func(a args) (string, url.Values, error) {
