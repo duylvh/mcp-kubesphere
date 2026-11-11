@@ -127,16 +127,23 @@ func guard(next http.Handler, tokenPath string, port string) http.Handler {
 	})
 }
 
+// preflight refuses a non-loopback listen address or an invalid token file,
+// before anything else starts.
+func preflight(addr string) error {
+	if err := loopbackOnly(addr); err != nil {
+		return err
+	}
+	_, err := loadToken(os.Getenv(TokenFileEnvVar))
+	return err
+}
+
 // serveGuarded serves h on the loopback address addr behind guard.
 func serveGuarded(addr string, h http.Handler) error {
-	if err := loopbackOnly(addr); err != nil {
+	if err := preflight(addr); err != nil {
 		return err
 	}
 	_, port, _ := net.SplitHostPort(addr)
 	tokenPath := os.Getenv(TokenFileEnvVar)
-	if _, err := loadToken(tokenPath); err != nil {
-		return err
-	}
 	srv := &http.Server{Addr: addr, Handler: guard(h, tokenPath, port), ReadHeaderTimeout: 10 * time.Second}
 	return srv.ListenAndServe()
 }

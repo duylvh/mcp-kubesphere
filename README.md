@@ -19,7 +19,23 @@ Building needs Go 1.25.5 or newer. The `toolchain go1.26.9` line in `go.mod` mak
 
 ```bash
 go build -o mcp-kubesphere ./cmd
-mcp-kubesphere stdio   # or: mcp-kubesphere sse --port 3000
+mcp-kubesphere stdio
+```
+
+## HTTP and SSE
+
+Both network modes listen on a loopback IP only and refuse any other address at startup. Every request must carry `Authorization: Bearer <token>`, where the token is read from the file named by `KS_MCP_SERVER_TOKEN_FILE`:
+
+- The file must be a regular file, not a symlink, owned by the user running the server, mode `0600`, holding 64 lowercase hex characters and an optional newline, e.g. `openssl rand -hex 32`.
+- It is re-read when its modification time changes, so a rotated token needs no restart.
+- A missing or wrong token gets a plain `401` with no `WWW-Authenticate` header. A request with any `Origin` header, or whose `Host` is not exactly `127.0.0.1:<port>` or `localhost:<port>`, gets `403`.
+
+```bash
+# Stateless streamable HTTP at http://127.0.0.1:47814/mcp
+KS_MCP_SERVER_TOKEN_FILE=~/.config/mcp-kubesphere/token mcp-kubesphere http --address 127.0.0.1:47814 --endpoint-path /mcp
+
+# SSE at http://127.0.0.1:3000/sse
+KS_MCP_SERVER_TOKEN_FILE=~/.config/mcp-kubesphere/token mcp-kubesphere sse --address 127.0.0.1 --port 3000
 ```
 
 ## Authentication

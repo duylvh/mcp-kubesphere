@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -151,4 +153,38 @@ func TestGuardServesStreamableHTTP(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.Contains(t, w.Body.String(), `"tools"`)
 	assert.Empty(t, w.Header().Get("Mcp-Session-Id"))
+}
+
+func TestSSERefusesANonLoopbackAddress(t *testing.T) {
+	t.Setenv(TokenFileEnvVar, writeToken(t, t.TempDir(), tokenA, 0o600))
+	for _, address := range []string{"0.0.0.0", "", "192.168.1.2"} {
+		cmd := newSSECommand()
+		cmd.SetArgs([]string{"--address", address, "--port", "1"})
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		err := cmd.Execute()
+		require.Error(t, err, address)
+		assert.Contains(t, err.Error(), "loopback", address)
+	}
+}
+
+func TestSSEWithoutTokenIs401(t *testing.T) {
+	h := guard(server.NewSSEServer(server.NewMCPServer("KubeSphere", "test")), writeToken(t, t.TempDir(), tokenA, 0o600), "3000")
+	r := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:3000/sse", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Empty(t, w.Header().Values("WWW-Authenticate"))
+}
+
+func TestSSEWithTokenOpensTheStream(t *testing.T) {
+	h := guard(server.NewSSEServer(server.NewMCPServer("KubeSphere", "test")), writeToken(t, t.TempDir(), tokenA, 0o600), "3000")
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+	r := httptest.NewRequestWithContext(ctx, http.MethodGet, "http://localhost:3000/sse", nil)
+	r.Header.Set("Authorization", "Bearer "+tokenA)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	assert.Equal(t, "text/event-stream", w.Header().Get("Content-Type"))
+	assert.Contains(t, w.Body.String(), "event: endpoint")
 }

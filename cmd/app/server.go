@@ -2,8 +2,8 @@ package app
 
 import (
 	"fmt"
+	"net"
 	"net/http"
-	"os"
 
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
@@ -64,13 +64,17 @@ func newSSECommand() *cobra.Command {
 	o := options.NewSSEOptions()
 	cmd := &cobra.Command{
 		Use:   "sse",
-		Short: "Start sse server",
+		Short: "Start an sse server on loopback, guarded by the bearer token in " + TokenFileEnvVar,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			addr := net.JoinHostPort(o.Address, o.Port)
+			if err := preflight(addr); err != nil {
+				return err
+			}
 			s, err := newMCPServer(o.KSConfig, o.KSApiserver)
 			if err != nil {
 				return err
 			}
-			return server.NewSSEServer(s).Start(":" + o.Port)
+			return serveGuarded(addr, server.NewSSEServer(s))
 		},
 	}
 
@@ -86,10 +90,7 @@ func newHTTPCommand() *cobra.Command {
 		Use:   "http",
 		Short: "Start a stateless streamable HTTP server on loopback, guarded by the bearer token in " + TokenFileEnvVar,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := loopbackOnly(o.Address); err != nil {
-				return err
-			}
-			if _, err := loadToken(os.Getenv(TokenFileEnvVar)); err != nil {
+			if err := preflight(o.Address); err != nil {
 				return err
 			}
 			s, err := newMCPServer(o.KSConfig, o.KSApiserver)
