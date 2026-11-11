@@ -2,6 +2,8 @@ package app
 
 import (
 	"fmt"
+	"net/http"
+	"os"
 
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
@@ -23,6 +25,7 @@ func NewRootCommand() *cobra.Command {
 	cmd.AddCommand(newVersionCommand())
 	cmd.AddCommand(newStudioCommand())
 	cmd.AddCommand(newSSECommand())
+	cmd.AddCommand(newHTTPCommand())
 
 	return cmd
 }
@@ -68,6 +71,35 @@ func newSSECommand() *cobra.Command {
 				return err
 			}
 			return server.NewSSEServer(s).Start(":" + o.Port)
+		},
+	}
+
+	for _, f := range o.Flags().FlagSets {
+		cmd.Flags().AddFlagSet(f)
+	}
+	return cmd
+}
+
+func newHTTPCommand() *cobra.Command {
+	o := options.NewHTTPOptions()
+	cmd := &cobra.Command{
+		Use:   "http",
+		Short: "Start a stateless streamable HTTP server on loopback, guarded by the bearer token in " + TokenFileEnvVar,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := loopbackOnly(o.Address); err != nil {
+				return err
+			}
+			if _, err := loadToken(os.Getenv(TokenFileEnvVar)); err != nil {
+				return err
+			}
+			s, err := newMCPServer(o.KSConfig, o.KSApiserver)
+			if err != nil {
+				return err
+			}
+			mux := http.NewServeMux()
+			mux.Handle(o.EndpointPath, server.NewStreamableHTTPServer(s,
+				server.WithStateLess(true), server.WithEndpointPath(o.EndpointPath)))
+			return serveGuarded(o.Address, mux)
 		},
 	}
 

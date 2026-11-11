@@ -96,7 +96,7 @@ type route func(a args) (path string, query url.Values, err error)
 // Failures become tool errors so the model sees the KubeSphere message.
 func handle(ks *kubesphere.KSConfig, r route, post func([]byte) ([]byte, error)) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		path, query, err := r(args(request.Params.Arguments))
+		path, query, err := r(args(request.GetArguments()))
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -132,5 +132,6 @@ func clusterOption(required bool) mcp.ToolOption {
 }
 
 func newTool(name, description string, opts ...mcp.ToolOption) mcp.Tool {
-	return mcp.NewTool(name, append([]mcp.ToolOption{mcp.WithDescription(description)}, opts...)...)
+	// keep the pre-v1 wire output `annotations: {}`; mcp-go v1 NewTool fills spec defaults explicitly
+	return mcp.NewTool(name, append([]mcp.ToolOption{mcp.WithToolAnnotation(mcp.ToolAnnotation{}), mcp.WithDescription(description)}, opts...)...)
 }

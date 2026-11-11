@@ -72,7 +72,7 @@ func resourceRoute(resource string, namespaced bool) route {
 func projectHint(h server.ToolHandlerFunc) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		res, err := h(ctx, request)
-		if err != nil || res == nil || !res.IsError || args(request.Params.Arguments).str("project") != "" {
+		if err != nil || res == nil || !res.IsError || args(request.GetArguments()).str("project") != "" {
 			return res, err
 		}
 		for _, c := range res.Content {

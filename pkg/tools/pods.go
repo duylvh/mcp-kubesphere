@@ -197,7 +197,7 @@ func eventsRoute(a args) (string, url.Values, error) {
 
 func listEvents(ks *kubesphere.KSConfig) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		a := args(request.Params.Arguments)
+		a := args(request.GetArguments())
 		limit := min(a.positive("limit", defEventLimit), maxEventLimit)
 		return handle(ks, eventsRoute, func(body []byte) ([]byte, error) { return newestEvents(body, limit) })(ctx, request)
 	}

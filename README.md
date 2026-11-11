@@ -15,6 +15,8 @@ All tools are read-only GET requests.
 
 ## Build
 
+Building needs Go 1.25.5 or newer. The `toolchain go1.26.9` line in `go.mod` makes Go's default `GOTOOLCHAIN=auto` mode build with Go 1.26.9, as mcp-grafana does.
+
 ```bash
 go build -o mcp-kubesphere ./cmd
 mcp-kubesphere stdio   # or: mcp-kubesphere sse --port 3000
